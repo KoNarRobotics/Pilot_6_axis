@@ -137,7 +137,7 @@ def test():
     except KeyboardInterrupt:
       keyboard_controller.stop()
       break
-                                           
+
 
 def main():
   desc = """\n[HELP]
@@ -187,7 +187,6 @@ def main():
   if args.i is None:
     parser.print_help()
     print(desc)
-    # ip='192.168.1.210'
     return 1  
   if joystick_value is not None and joystick_value < 0 or joystick_value > 1:
     print("Joystick value must be between 0 and 1")

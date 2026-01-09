@@ -19,7 +19,8 @@ setup(
     license='MIT',
     tests_require=['pytest'],
     entry_points={
-        'console_scripts': [ 'rc_node = pilot_6axis.pilot_6axis:main'
+        'console_scripts': [ 
+          'rc_node = pilot_6axis.pilot_6axis:main'
         ],
     },
 )

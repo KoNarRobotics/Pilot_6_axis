@@ -3,7 +3,7 @@
 <package format="3">
   <name>pilot_6axis</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>This package is deprecated; use remote_6d instead. </description>
   <maintainer email="dudzinski.patryk.02@gmail.com">lemonx</maintainer>
   <license>MIT</license>
 
