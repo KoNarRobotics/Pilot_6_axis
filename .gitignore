@@ -1,2 +1,7 @@
 __pycache__
 .venv/
+
+
+*.lck
+
+Electric schematic/Pilot6Axis/Pilot6Axis-backups
