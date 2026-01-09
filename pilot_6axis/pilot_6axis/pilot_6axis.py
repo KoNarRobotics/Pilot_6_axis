@@ -12,6 +12,7 @@ class lemonJoyPublisher(Node):
   def __init__(self):
     super().__init__("pilot_6axis")
     # parameters to set topic where the joy message will be published
+    self.get_logger().warn(f"The pilot_6axis package is deprecated; please use remote_6d instead.")
 
     self.declare_parameter("pilot_six_axis_joy_topic", "/joy")
     joy_topic = self.get_parameter("pilot_six_axis_joy_topic").value

@@ -1,14 +1,13 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <cstring>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
-#include <vector>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -18,18 +17,65 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/joy.hpp"
 
-using namespace std::chrono_literals;
-
 namespace {
 
-constexpr size_t kAxisCount    = 6;
-constexpr size_t kButtonCount  = 10;
-constexpr double kMaxZeroPos   = 0.01;
-constexpr double kAnalogDiv    = 2048.0;
-constexpr int kBindPort        = 25000;
-constexpr double kDisconnectNs = 5e8; // 0.5 seconds
+constexpr std::chrono::milliseconds kPublishPeriod{ 50 };
+const rclcpp::Duration kDisconnectTimeout{ std::chrono::milliseconds(500) };
+constexpr int kBindPort            = 25000;
+constexpr std::size_t kAxisCount   = 6;
+constexpr std::size_t kButtonCount = 10;
+constexpr double kMaxZeroPos       = 0.01;
+constexpr double kAnalogDiv        = 2048.0;
 
-struct RemoteControler6D {
+class RemoteControler6D {
+public:
+  static std::optional<RemoteControler6D> from_packet(std::string_view bytes, double frequency) {
+    if(bytes.size() != 62) {
+      return std::nullopt;
+    }
+
+    std::array<std::string_view, 18> parts{};
+    std::size_t part_index = 0;
+    std::size_t start      = 0;
+    while(part_index < parts.size() && start <= bytes.size()) {
+      std::size_t pos = bytes.find(':', start);
+      if(pos == std::string_view::npos) {
+        parts[part_index++] = bytes.substr(start);
+        break;
+      }
+      parts[part_index++] = bytes.substr(start, pos - start);
+      start               = pos + 1;
+    }
+
+    if(part_index != parts.size() || parts.front() != "$RC" || parts.back() != "#\r") {
+      return std::nullopt;
+    }
+
+    RemoteControler6D out;
+    out.frequency = frequency;
+    try {
+      out.joystick_1_x   = std::stoi(std::string(parts[1]));
+      out.joystick_1_y   = std::stoi(std::string(parts[2]));
+      out.joystick_1_z   = std::stoi(std::string(parts[3]));
+      out.joystick_1_btn = std::stoi(std::string(parts[4]));
+      out.joystick_2_x   = std::stoi(std::string(parts[5]));
+      out.joystick_2_y   = std::stoi(std::string(parts[6]));
+      out.joystick_2_z   = std::stoi(std::string(parts[7]));
+      out.joystick_2_btn = std::stoi(std::string(parts[8]));
+      out.button_1       = std::stoi(std::string(parts[9]));
+      out.button_2       = std::stoi(std::string(parts[10]));
+      out.button_3       = std::stoi(std::string(parts[11]));
+      out.button_4       = std::stoi(std::string(parts[12]));
+      out.button_5       = std::stoi(std::string(parts[13]));
+      out.button_6       = std::stoi(std::string(parts[14]));
+      out.button_7       = std::stoi(std::string(parts[15]));
+      out.button_8       = std::stoi(std::string(parts[16]));
+    } catch(...) {
+      return std::nullopt;
+    }
+    return out;
+  }
+
   double frequency{ 0.0 };
   int joystick_1_x{ 0 };
   int joystick_1_y{ 0 };
@@ -49,10 +95,9 @@ struct RemoteControler6D {
   int button_8{ 0 };
 };
 
-
-class UDPReceiver {
+class UdpReceiver {
 public:
-  explicit UDPReceiver(int port) : port_(port) {
+  explicit UdpReceiver(int port) : port_(port) {
     socket_fd_ = ::socket(AF_INET, SOCK_DGRAM, 0);
     if(socket_fd_ < 0) {
       throw std::runtime_error("Failed to create socket");
@@ -61,7 +106,7 @@ public:
     sockaddr_in addr{};
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port        = htons(port_);
+    addr.sin_port        = htons(static_cast<uint16_t>(port_));
 
     if(::bind(socket_fd_, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
       ::close(socket_fd_);
@@ -69,7 +114,7 @@ public:
     }
   }
 
-  ~UDPReceiver() {
+  ~UdpReceiver() {
     stop();
   }
 
@@ -79,7 +124,7 @@ public:
 
   void start() {
     running_.store(true);
-    recv_thread_ = std::thread([this]() { this->receive_loop(); });
+    recv_thread_ = std::thread([this]() { receive_loop(); });
   }
 
   void stop() {
@@ -96,73 +141,31 @@ public:
 
 private:
   void receive_loop() {
-    constexpr size_t kBufferSize = 1024;
-    char buffer[kBufferSize];
+    constexpr std::size_t kBufferSize = 128;
+    std::array<char, kBufferSize> buffer{};
     auto previous = std::chrono::steady_clock::now();
 
     while(running_.load()) {
       sockaddr_in sender{};
       socklen_t sender_len = sizeof(sender);
       ssize_t received =
-      ::recvfrom(socket_fd_, buffer, kBufferSize, 0, reinterpret_cast<sockaddr *>(&sender), &sender_len);
+      ::recvfrom(socket_fd_, buffer.data(), buffer.size(), 0, reinterpret_cast<sockaddr *>(&sender), &sender_len);
       if(received <= 0) {
         continue;
       }
 
       auto now    = std::chrono::steady_clock::now();
-      double freq = 1.0 / std::chrono::duration<double>(now - previous).count();
+      double dt   = std::chrono::duration<double>(now - previous).count();
       previous    = now;
-      std::string packet(buffer, static_cast<size_t>(received));
+      double freq = dt > 0.0 ? 1.0 / dt : 0.0;
 
       if(callback_) {
-        RemoteControler6D data;
-        if(parse_packet(packet, freq, data)) {
-          callback_.value()(data);
+        auto packet = std::string_view(buffer.data(), static_cast<std::size_t>(received));
+        if(auto data = RemoteControler6D::from_packet(packet, freq)) {
+          callback_.value()(*data);
         }
       }
     }
-  }
-
-  bool parse_packet(const std::string &bytes, double frequency, RemoteControler6D &out) {
-    if(bytes.size() != 62) {
-      return false;
-    }
-
-    std::vector<std::string> parts;
-    size_t start = 0;
-    size_t pos   = 0;
-    while((pos = bytes.find(':', start)) != std::string::npos) {
-      parts.emplace_back(bytes.substr(start, pos - start));
-      start = pos + 1;
-    }
-    parts.emplace_back(bytes.substr(start));
-
-    if(parts.size() != 18 || parts.front() != "$RC" || parts.back() != "#\r") {
-      return false;
-    }
-
-    try {
-      out.frequency      = frequency;
-      out.joystick_1_x   = std::stoi(parts[1]);
-      out.joystick_1_y   = std::stoi(parts[2]);
-      out.joystick_1_z   = std::stoi(parts[3]);
-      out.joystick_1_btn = std::stoi(parts[4]);
-      out.joystick_2_x   = std::stoi(parts[5]);
-      out.joystick_2_y   = std::stoi(parts[6]);
-      out.joystick_2_z   = std::stoi(parts[7]);
-      out.joystick_2_btn = std::stoi(parts[8]);
-      out.button_1       = std::stoi(parts[9]);
-      out.button_2       = std::stoi(parts[10]);
-      out.button_3       = std::stoi(parts[11]);
-      out.button_4       = std::stoi(parts[12]);
-      out.button_5       = std::stoi(parts[13]);
-      out.button_6       = std::stoi(parts[14]);
-      out.button_7       = std::stoi(parts[15]);
-      out.button_8       = std::stoi(parts[16]);
-    } catch(...) {
-      return false;
-    }
-    return true;
   }
 
   int port_{ 0 };
@@ -172,24 +175,25 @@ private:
   std::optional<std::function<void(const RemoteControler6D &)>> callback_;
 };
 
+double map_value(int raw) {
+  const double value = static_cast<double>(raw) / kAnalogDiv;
+  if(value < kMaxZeroPos && value > -kMaxZeroPos) {
+    return 0.0;
+  }
+  return value;
+}
 
 } // namespace
 
 class RemoteJoystickDriver : public rclcpp::Node {
 public:
-  RemoteJoystickDriver() : Node("remote_joystick_driver"), receiver_(kBindPort) {
-    declare_parameter<std::string>("pilot_six_axis_joy_topic", "/joy");
-    const auto joy_topic = get_parameter("pilot_six_axis_joy_topic").as_string();
-    RCLCPP_INFO(get_logger(), "Joy topic: %s", joy_topic.c_str());
-
-    publisher_ = this->create_publisher<sensor_msgs::msg::Joy>(joy_topic, 10);
-    timer_     = this->create_wall_timer(50ms, std::bind(&RemoteJoystickDriver::on_timer, this));
-
+  RemoteJoystickDriver() : rclcpp::Node("remote_joystick_driver"), receiver_(kBindPort) {
+    publisher_ = create_publisher<sensor_msgs::msg::Joy>("joy", 10);
+    timer_     = create_wall_timer(kPublishPeriod, std::bind(&RemoteJoystickDriver::on_timer, this));
     receiver_.on_receive([this](const RemoteControler6D &data) { handle_receive(data); });
+    last_connection_ = now();
     receiver_.start();
-
-    last_connection_ = this->now();
-    RCLCPP_INFO(this->get_logger(), "Remote joystick receiver started on UDP port %d", kBindPort);
+    RCLCPP_INFO(get_logger(), "Remote joystick receiver started on UDP port %d", kBindPort);
   }
 
   ~RemoteJoystickDriver() override {
@@ -201,12 +205,12 @@ private:
     std::lock_guard<std::mutex> lock(data_mutex_);
 
     if(!connected_) {
-      RCLCPP_INFO(this->get_logger(), "Pilot Connected");
+      RCLCPP_INFO(get_logger(), "Pilot Connected");
     }
 
     connected_       = true;
     zero_sent_       = false;
-    last_connection_ = this->now();
+    last_connection_ = now();
 
     axes_[0]    = map_value(data.joystick_1_x);
     axes_[1]    = map_value(data.joystick_1_y);
@@ -234,9 +238,9 @@ private:
 
     {
       std::lock_guard<std::mutex> lock(data_mutex_);
-      auto now = this->now();
-      if((now - last_connection_).nanoseconds() > kDisconnectNs && connected_) {
-        RCLCPP_WARN(this->get_logger(), "Pilot Disconnected");
+      const auto elapsed = now() - last_connection_;
+      if(connected_ && elapsed > kDisconnectTimeout) {
+        RCLCPP_WARN(get_logger(), "Pilot Disconnected");
         connected_   = false;
         publish_zero = !zero_sent_;
         zero_sent_   = true;
@@ -255,26 +259,17 @@ private:
     if(connected_copy || publish_zero) {
       sensor_msgs::msg::Joy msg;
       msg.header.frame_id = "joy";
-      msg.header.stamp    = this->now();
+      msg.header.stamp    = now();
       msg.axes.assign(axes_copy.begin(), axes_copy.end());
       msg.buttons.assign(buttons_copy.begin(), buttons_copy.end());
       publisher_->publish(msg);
     }
   }
 
-  double map_value(int raw) {
-    double value = static_cast<double>(raw) / kAnalogDiv;
-    if(value < kMaxZeroPos && value > -kMaxZeroPos) {
-      return 0.0;
-    }
-    return value;
-  }
-
-
   rclcpp::Publisher<sensor_msgs::msg::Joy>::SharedPtr publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
 
-  UDPReceiver receiver_;
+  UdpReceiver receiver_;
   std::mutex data_mutex_;
   std::array<double, kAxisCount> axes_{};
   std::array<int32_t, kButtonCount> buttons_{};
