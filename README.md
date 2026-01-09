@@ -1,75 +1,74 @@
-# 6 axis remote Controler
-- Works over Wi-Fi ( sends constant length ASCI data frame)
-- Up to 6 networks saved (with priority from  1 to 6)
-- All settings of the Rc can be changed on a configuration website
-- Controled inertia of the joysticks and signal values of the joystick coordinates
-- Veriable signal refresh rate up to 200Hz
-- Auto zero positioning (no more robots moving in slow speed without touching the pilot)
-- USB-C charged!
-- two 3-DOF joysticks
-- 10 buttons (2 of which are on Joy Sticks)
-- Integrated LCD
-- The RC remembers settings so no need to set it up every time or reprogram it.
+# 6 axis remote Controller
+- ***ROS 2 integration***.
+- ***Wi‑Fi connectivity***
+- ***Saves up to 6 networks (prioritized 1–6)***
+- ***Full configuration via web UI***
+- ***Adjustable joystick inertia and signal scaling***
+- ***Refresh rates up to 200 Hz***
+- ***Auto-zero to prevent unintended motion***
+- ***USB‑C charging***
+- ***Two 3‑DOF joysticks + 10 buttons (2 on sticks)***
+- ***Integrated LCD for status and setup***
+- ***Persistent settings across sessions***
 
-![Image](images/pilot_2.png)
+
+![Image](images/pilot_2.png){width=50%}
+
+
+## ROS 2 Packages
+
+### **remote_6d** (Recommended)
+C++ implementation for reliable remote control integration. Receives UDP packets over Wi-Fi, parses 6-axis joystick and 10-button data, applies deadband filtering, and publishes to the `/joy` ROS 2 topic. Handles graceful disconnects by sending a zero frame when the pilot loses connection.
+
+### **pilot_6axis** (Deprecated)
+Python-based UDP receiver that converts remote control packets into ROS 2 `sensor_msgs::msg::Joy` messages for joystick control. No longer maintained; use `remote_6d` instead.
+
 
 ## The repo supports demo pc keyboard version of the RC 
- Pc keyboard version for RC without the need for the hardware.
- 
+ Pc keyboard version for RC without the need for the hardware if you want to test it or forgot to bring the RC with you :).
+1. Full version
  ```bash
   python3 -m venv .venv
   python3 -m pip -r requirements.txt
   source .venv/bin/activate
-  python3 pilot_6axis/pilot_6axis/keyboard_rc.py -i IP_ADDRESS -p PORT -f FREQUENCY -v JOYSTICK_VALUE
+  python3 keyboard_rc.py -i IP_ADDRESS -p PORT -f FREQUENCY -v JOYSTICK_VALUE
  ```
-for help
+ 2. Quick version (because you are most likely testing on localhost)
+  ```bash
+    python3 keyboard_rc.py -i 127.0.0.1
+  ```
+3. For help about arguments, and buttons mapping run: 
 ```bash
-  python3 pilot_6axis/pilot_6axis/keyboard_rc.py
+  python3 keyboard_rc.py
  ```
 
-## To build and run ros package
-```bash
-  colcon build --packages-select pilot_6axis
-  source install/setup.bash 
-  ros2 run pilot_6axis rc_node
-```
-
-
-## Data frame
- Consist of 18 elements separated by ':'.
-Depending on the settings int_Joystick_(left/right)_(MMin/MMax) value returned by joystick will vary. This setting values should be between -9999<=x<=9999 or 0<=x<=99999 or the data frame length won't be constant, for buttons: 1-pressed 0-not pressed.
-```bash
- Example: "$Rc:  340:   200:   12:1:  500:-2045: 2045:1:1:1:0:1:1:0:1:0:#\r"
-```
-
- 1. control beginning "$Rc"
- 2. joystick_left_x   (5-characters) 
- 3. joystick_left_y   (5-characters)
- 4. joystick_left_z   (5-characters)
- 5. joystick_left_btn  (1-character)
- 6. joystick_right_x   (5-characters)
- 7. joystick_right_y   (5-characters)
- 8. joystick_right_z   (5-characters)
- 9. joystick_right_btn  (1-character)
- 10. btn_1  (1-character)
- 11. btn_2  (1-character)
- 12. btn_3  (1-character)
- 13. btn_4  (1-character)
- 14. btn_5  (1-character)
- 15. btn_6  (1-character)
- 16. btn_7  (1-character)
- 17. btn_8  (1-character)
- 18. control end "#\r"
-
-## How to use
-### Setup
+ ## How to use
+### Setup of the Rc
   1. Enable setup mode by pressing and holding the most centeral button 4 or 5 when turning the Rc On (doesn't matter which one).
   2. Connect to the Rc Wi-Fi network that is displayed on  the LCD.
   3. Open web browser and go to url displayed on the LCD.
   4. Set up the settings of the Rc and press save buttons on the bottom of the page. This will redirect you to the page where you will see if settings were saved. If you made some error it will be shown here.
+![Image](images/web.png){width=40%}
+
   5. To leave setup mode shut down the Rc and turn it on again.
   6. Now the Rc will connect to the network with the highest priority that is available. If it can't connect to any of the saved networks it will keep trying to connect to them. If the Rc is connected to the network it will display the IP address on the LCD and show Connected status.
   7. Now setup is done and you can use the Rc.
+
+### Build ROS packages
+- Standard way of building ROS 2 packages.
+```bash
+  colcon build --symlink-install
+```
+### Run ROS packages
+- Run the remote_6d package
+```bash
+  ros2 run remote_6d remote_6d_node
+```
+- If the Rc is connected to the same network as the computer and the port isn't blocked by firewall the package should start receiving data from the Rc and publishing it to the `/joy` topic.
+
+
+
+
 ## Settings list:
 #### General Settings
   - **Joystick left MMin** -> minimum value of the left joystick x, y, z axis on the min of the range 
