@@ -259,7 +259,7 @@ private:
     if(connected_copy || publish_zero) {
       sensor_msgs::msg::Joy msg;
       msg.header.frame_id = "joy";
-      msg.header.stamp    = now();
+      msg.header.stamp    = get_clock()->now();
       msg.axes.assign(axes_copy.begin(), axes_copy.end());
       msg.buttons.assign(buttons_copy.begin(), buttons_copy.end());
       publisher_->publish(msg);
